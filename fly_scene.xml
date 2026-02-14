@@ -1,0 +1,41 @@
+<mujoco model="Fly">
+  <include file="model/flex/scene.xml"/>
+  <option integrator="implicitfast" timestep="0.002"/>
+  <visual>
+    <map stiffness="300"/>
+  </visual>
+  <default>
+    <geom friction="0.3 0.01 0.001" density="1000"/>
+    <joint damping="0.1"/>
+  </default>
+  <worldbody>
+    <body name="fly" pos="0 0 0.1">
+      <joint name="x" type="slide" axis="1 0 0" range="-1 1"/>
+      <joint name="y" type="slide" axis="0 1 0" range="-1 1"/>
+      <joint name="z" type="slide" axis="0 0 1" range="0 2"/>
+      <joint name="yaw" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+      <geom name="body" type="ellipsoid" size="0.01 0.006 0.006" rgba="0.2 0.2 0.2 1"/>
+      <body name="wing_left" pos="-0.015 0 0.006">
+        <joint name="wing_left_hinge" type="hinge" axis="0 1 0" range="-1.5 1.5"/>
+        <geom type="box" size="0.02 0.001 0.005" rgba="0.8 0.8 0.8 1"/>
+      </body>
+      <body name="wing_right" pos="0.015 0 0.006">
+        <joint name="wing_right_hinge" type="hinge" axis="0 -1 0" range="-1.5 1.5"/>
+        <geom type="box" size="0.02 0.001 0.005" rgba="0.8 0.8 0.8 1"/>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="ax" joint="x" kp="200" ctrlrange="-0.5 0.5"/>
+    <position name="ay" joint="y" kp="200" ctrlrange="-0.5 0.5"/>
+    <position name="az" joint="z" kp="200" ctrlrange="0 1"/>
+    <motor name="flap_left" joint="wing_left_hinge" gear="10"/>
+    <motor name="flap_right" joint="wing_right_hinge" gear="10"/>
+  </actuator>
+  <keyframe>
+    <key name="hover" qpos="0 0 0.3 0 0 0"/>
+    <key name="forward" qpos="0.4 0 0.4 0 0 0"/>
+    <key name="left" qpos="0.4 0.2 0.4 0 0.2 0"/>
+    <key name="land" qpos="0.5 0 0.05 0 0 0"/>
+  </keyframe>
+</mujoco>

@@ -1,0 +1,15 @@
+# Ignore temporary files
+*.pyc
+__pycache__/
+*.db
+temp_scene.xml
+.vscode/
+bin/
+include/
+lib/
+model/
+mujoco_menagerie-main/
+*.zip
+*.tar.gz
+*.exe
+*.dll

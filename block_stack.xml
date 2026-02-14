@@ -1,0 +1,70 @@
+<mujoco model="BlockStack">
+  <include file="model/flex/scene.xml"/>
+  <compiler meshdir="d:/python/mujoco-3.4.0-windows-x86_64/mujoco_menagerie-main/mujoco_menagerie-main/franka_fr3/assets"/>
+  <include file="mujoco_menagerie-main/mujoco_menagerie-main/franka_fr3/fr3.xml"/>
+  <compiler meshdir="d:/python/mujoco-3.4.0-windows-x86_64/model/flex/asset" texturedir="d:/python/mujoco-3.4.0-windows-x86_64/model/flex/asset"/>
+  <option solver="CG" tolerance="1e-6" integrator="implicitfast" timestep="0.002" density="10"/>
+  <size memory="100M"/>
+  <visual>
+    <map stiffness="300"/>
+  </visual>
+  <default>
+    <geom friction="1 0.005 0.0001" solref="0.005 1"/>
+    <adhesion ctrlrange="0 500"/>
+  </default>
+  <compiler meshdir="model/flex/asset" texturedir="model/flex/asset"/>
+  <worldbody>
+    <body name="gripper_root" pos="0 0 0.35">
+      <site name="gripper_site" pos="0 0 0"/>
+      <freejoint/>
+      <!-- 吸盘工具底座 -->
+      <geom type="cylinder" size="0.04 0.02" rgba=".2 .2 .2 1" pos="0 0 -0.02" contype="0" conaffinity="0"/>
+      <!-- 吸盘杆 -->
+      <geom type="cylinder" size="0.01 0.08" rgba=".8 .8 .8 1" pos="0 0 -0.10" contype="0" conaffinity="0"/>
+      <!-- 吸盘头 (接触体) -->
+      <body name="suction_cup" pos="0 0 -0.18">
+          <!-- 软接触垫 -->
+          <geom type="cylinder" size="0.025 0.01" rgba="0 .7 .7 0.8" solref="0.005 1" solimp="0.95 0.99 0.001 0.5 2" friction="2 0.5 0.01"/>
+          <site name="suction_point" pos="0 0 -0.01" size="0.005" rgba="1 0 0 0.5"/>
+      </body>
+    </body>
+    
+    <!-- 目标方块 1 (红) -->
+    <body name="block1" pos="0.45 -0.1 0.025">
+      <freejoint/>
+      <geom type="box" size="0.025 0.025 0.025" rgba="0.9 0.1 0.1 1" mass="0.1" friction="1 0.005 0.0001"/>
+      <site name="block1_site" pos="0 0 0" size="0.01" rgba="0 1 0 0.5"/>
+    </body>
+    
+    <!-- 目标方块 2 (绿) -->
+    <body name="block2" pos="0.45 0.0 0.025">
+      <freejoint/>
+      <geom type="box" size="0.025 0.025 0.025" rgba="0.1 0.9 0.1 1" mass="0.1" friction="1 0.005 0.0001"/>
+      <site name="block2_site" pos="0 0 0" size="0.01" rgba="0 1 0 0.5"/>
+    </body>
+    
+    <!-- 目标方块 3 (蓝) -->
+    <body name="block3" pos="0.45 0.1 0.025">
+      <freejoint/>
+      <geom type="box" size="0.025 0.025 0.025" rgba="0.1 0.1 0.9 1" mass="0.1" friction="1 0.005 0.0001"/>
+      <site name="block3_site" pos="0 0 0" size="0.01" rgba="0 1 0 0.5"/>
+    </body>
+    
+    <!-- 堆叠基座区域 -->
+    <site name="stack_base" pos="0.6 0 0.001" size="0.05" rgba="0.5 0.5 0.5 0.5"/>
+    
+  </worldbody>
+  <equality>
+    <connect site1="attachment_site" site2="gripper_site"/>
+  </equality>
+  <actuator>
+    <!-- 吸附力执行器 -->
+    <adhesion name="suction" body="suction_cup" ctrlrange="0 30" gain="1"/>
+  </actuator>
+  <contact>
+      <!-- 排除自碰撞 -->
+    <exclude body1="fr3_link6" body2="gripper_root"/>
+    <exclude body1="fr3_link7" body2="gripper_root"/>
+    <exclude body1="fr3_link7" body2="suction_cup"/>
+  </contact>
+</mujoco>
