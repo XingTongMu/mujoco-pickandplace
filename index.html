@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MuJoCo Hand Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #222; color: #fff; }
+        .container { display: flex; justify-content: center; gap: 20px; padding: 20px; }
+        .view-box { border: 2px solid #555; border-radius: 10px; overflow: hidden; position: relative; }
+        video { transform: scaleX(-1); } /* Mirror */
+        canvas { position: absolute; left: 0; top: 0; transform: scaleX(-1); }
+        #status { font-weight: bold; color: #0f0; margin: 10px; }
+        .controls { margin-top: 20px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #444; color: white; border: none; border-radius: 5px; }
+        button:hover { background: #666; }
+        button.active { background: #0a0; }
+    </style>
+</head>
+<body>
+    <h1>MuJoCo Hand Control</h1>
+    <div id="status">Connecting...</div>
+
+    <div class="container">
+        <!-- 摄像头画面 -->
+        <div class="view-box">
+            <h3>Camera Input</h3>
+            <video id="input_video" width="640" height="480" autoplay></video>
+            <canvas id="output_canvas" width="640" height="480"></canvas>
+        </div>
+        
+        <!-- 数据显示 -->
+        <div class="view-box" style="width: 300px; padding: 20px; text-align: left;">
+            <h3>Control State</h3>
+            <p>Mode: <span id="mode_disp">Waiting</span></p>
+            <p>Hand: <span id="hand_disp">None</span></p>
+            <p>Index Finger: <span id="finger_disp">0.00</span></p>
+            <p>Grasp: <span id="grasp_disp">Open</span></p>
+            <p>Position X: <span id="pos_x">0.00</span></p>
+            <p>Position Y: <span id="pos_y">0.00</span></p>
+            <p>Position Z: <span id="pos_z">0.00</span></p>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button id="toggle_control" onclick="toggleControl()">Enable Control</button>
+        <button onclick="resetView()">Reset View</button>
+    </div>
+
+    <script>
+        const socket = io();
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        let isControlEnabled = false;
+
+        socket.on('connect', () => {
+            document.getElementById('status').innerText = "Connected to Server";
+            document.getElementById('status').style.color = "#0f0";
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('status').innerText = "Disconnected";
+            document.getElementById('status').style.color = "#f00";
+        });
+
+        function toggleControl() {
+            isControlEnabled = !isControlEnabled;
+            const btn = document.getElementById('toggle_control');
+            btn.innerText = isControlEnabled ? "Disable Control" : "Enable Control";
+            btn.classList.toggle("active");
+            document.getElementById('mode_disp').innerText = isControlEnabled ? "Active" : "Paused";
+            
+            socket.emit('control_state', { active: isControlEnabled });
+        }
+
+        function resetView() {
+            socket.emit('reset_sim');
+        }
+
+        // MediaPipe Hands Setup
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0]; // 只取第一只手
+                
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+
+                if (isControlEnabled) {
+                    processHandData(landmarks);
+                    // 添加新的手指数据处理
+                    processFingerData(landmarks);
+                    // 添加手腕位置处理
+                    processWristData(landmarks);
+                }
+                
+                document.getElementById('hand_disp').innerText = "Detected";
+            } else {
+                document.getElementById('hand_disp').innerText = "None";
+            }
+            canvasCtx.restore();
+        }
+
+        function processHandData(landmarks) {
+            // 提取关键点
+            // 0: Wrist
+            // 8: Index Tip
+            // 4: Thumb Tip
+            // 12: Middle Tip
+            
+            const wrist = landmarks[0];
+            const indexTip = landmarks[8];
+            const thumbTip = landmarks[4];
+            
+            // 简单的抓取检测：食指与拇指距离
+            const dist = Math.sqrt(
+                Math.pow(indexTip.x - thumbTip.x, 2) + 
+                Math.pow(indexTip.y - thumbTip.y, 2)
+            );
+            
+            const isGrasping = dist < 0.05; // 阈值需要调试
+
+            // Z轴控制：手掌大小 (Wrist 到 Middle Tip 的距离)
+            // 越近(大) -> 下降 (Z小)
+            // 越远(小) -> 抬起 (Z大)
+            const palmSize = Math.sqrt(
+                Math.pow(wrist.x - landmarks[12].x, 2) + 
+                Math.pow(wrist.y - landmarks[12].y, 2)
+            );
+            // 假设正常范围 0.1 ~ 0.3
+            // 映射到 Z: 0.1(远) -> 0.5(高), 0.3(近) -> 0.2(低)
+            let zVal = (palmSize - 0.1) / (0.3 - 0.1); // 0~1
+            if(zVal < 0) zVal = 0;
+            if(zVal > 1) zVal = 1;
+            // 反转：大(1) -> 低(0)
+            const relZ = 1.0 - zVal; 
+            
+            // 映射位置
+            // 图像坐标 (0~1) -> MuJoCo 空间
+            // x: 左右 (0.3 ~ 0.7) -> (-0.2 ~ 0.2)
+            // y: 上下 (0.2 ~ 0.8) -> (0.6 ~ 0.2) Z轴 or Y轴
+            
+            // 假设我们控制平面 XY，Z轴固定或通过另一手势控制
+            // 这里简化：X映射到机器人Y（横向），Y映射到机器人X（前后/上下）
+            // 或是直接映射到 3D 空间
+            
+            // 简单的相对映射
+            const relX = (wrist.x - 0.5) * -1.0; // 反转让镜像正确 -> 机器人左右
+            const relY = (0.5 - wrist.y); // 上下 -> 机器人前后/上下
+            
+            // 发送数据
+            const data = {
+                x: relX,
+                y: relY,
+                z: relZ, // 现在使用 Z
+                grasp: isGrasping ? 1.0 : 0.0
+            };
+            
+            // UI更新
+            document.getElementById('pos_x').innerText = data.x.toFixed(2);
+            document.getElementById('pos_y').innerText = data.y.toFixed(2);
+            document.getElementById('pos_z').innerText = data.z.toFixed(2);
+            document.getElementById('grasp_disp').innerText = isGrasping ? "Closed" : "Open";
+            
+            socket.emit('hand_data', data);
+        }
+
+        function processFingerData(landmarks) {
+            const wrist = landmarks[0];
+            const tips = [4, 8, 12, 16, 20];
+            const mcps = [2, 5, 9, 13, 17];
+            const pips = [3, 6, 10, 14, 18];
+            
+            let fingerFlex = [];
+            
+            // 手掌大小 (Scale Reference)
+            const palmScale = Math.sqrt(Math.pow(wrist.x - landmarks[9].x, 2) + Math.pow(wrist.y - landmarks[9].y, 2));
+
+            for(let i=0; i<5; i++) {
+                let flex = 0;
+                
+                if (i === 0) { // Thumb
+                    // 拇指指尖到小指MCP的距离 vs 拇指长度
+                    const d_th_pinky = Math.sqrt(Math.pow(landmarks[4].x - landmarks[17].x, 2) + Math.pow(landmarks[4].y - landmarks[17].y, 2));
+                    // Open: ~1.5 * palmScale, Closed: ~0.5 * palmScale
+                    const ratio = d_th_pinky / palmScale;
+                    flex = (1.5 - ratio) / (1.5 - 0.5);
+                } else {
+                    // Tip to Wrist Dist / MCP to Wrist Dist (Normalized by Palm)
+                    const d_tip = Math.sqrt(Math.pow(landmarks[tips[i]].x - wrist.x, 2) + Math.pow(landmarks[tips[i]].y - wrist.y, 2));
+                    const d_mcp = Math.sqrt(Math.pow(landmarks[mcps[i]].x - wrist.x, 2) + Math.pow(landmarks[mcps[i]].y - wrist.y, 2));
+                    
+                    // Ratio: Straight ~ 2.0+, Bent ~ 0.8
+                    const ratio = d_tip / d_mcp;
+                    flex = (2.2 - ratio) / (2.2 - 0.8);
+                }
+                
+                if(flex < 0) flex = 0;
+                if(flex > 1) flex = 1;
+                fingerFlex.push(flex);
+            }
+            socket.emit('finger_data', { fingers: fingerFlex });
+        }
+
+        function processWristData(landmarks) {
+            const wrist = landmarks[0];
+            
+            // 映射 X, Y
+            // 图像: x(0~1), y(0~1)
+            // 机器人: y(左右), x(前后/上下)
+            
+            const relX = (wrist.x - 0.5) * -1.0; // 左右
+            const relY = (0.5 - wrist.y); // 上下
+            
+            // Z轴：手掌大小
+            const palmScale = Math.sqrt(Math.pow(wrist.x - landmarks[9].x, 2) + Math.pow(wrist.y - landmarks[9].y, 2));
+            // 假设 0.05 (远) ~ 0.2 (近)
+            let zVal = (palmScale - 0.05) / (0.2 - 0.05);
+            if(zVal < 0) zVal = 0;
+            if(zVal > 1) zVal = 1;
+            
+            // 发送数据
+            socket.emit('wrist_data', { x: relX, y: relY, z: zVal });
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>

@@ -40,12 +40,33 @@
   - `scene_gen.py`: 基于模板生成随机场景 XML。
   - `grasp_db.py`: 数据库管理模块。
 
+### 5. 摄像头手势控制 (Camera Hand Control)
+- **功能**:
+  - 利用单目摄像头（Webcam）捕捉手部动作。
+  - **实时映射**: 手腕位置控制机械臂/机械手移动，手掌大小控制高度，手指动作控制抓取/弯曲。
+  - **支持模型**:
+    1. **Block Pick (方块抓取)**: 控制 Franka 机械臂移动与吸盘抓取。
+    2. **Allegro Hand (灵巧手)**: 控制 Wonik Allegro Hand 的4指弯曲与手掌空间移动。
+- **运行方式**:
+  ```bash
+  # 1. 安装依赖
+  pip install flask flask-socketio eventlet mediapipe
+  
+  # 2. 启动方块抓取控制
+  python web_control_server.py
+  
+  # 3. 启动灵巧手控制
+  python web_control_allegro.py
+  ```
+  启动后访问浏览器: `http://localhost:5000`
+
 ## 🚀 如何运行
 
 ### 环境依赖
 - Python 3.8+
 - MuJoCo (`pip install mujoco`)
 - NumPy (`pip install numpy`)
+- Flask, MediaPipe (仅手势控制需要)
 
 ### 运行示例
 
