@@ -13,3 +13,14 @@ mujoco_menagerie-main/
 *.tar.gz
 *.exe
 *.dll
+*.spec
+MUJOCO_LOG.TXT
+dist/
+build/
+uploads/
+generated_photo_scene.xml
+mujoco_repo/
+mujoco_menagerie/
+mujoco_menagerie_latest/
+mujoco_menagerie_new/
+temp_menagerie/

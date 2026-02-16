@@ -60,6 +60,18 @@
   ```
   启动后访问浏览器: `http://localhost:5000`
 
+### 6. 照片生成场景 (Photo-to-Scene)
+- **功能**:
+  - 上传一张环境照片，使用 OpenCV 做简单的前景分割与轮廓检测。
+  - 将检测到的物体近似为 box/cylinder，并生成对应的 MuJoCo 场景 XML。
+  - 通过浏览器手势遥控 FR3 机械臂（吸盘）移动场景中的物体。
+- **运行方式**:
+  ```bash
+  pip install opencv-contrib-python flask flask-socketio eventlet
+  python photo_env_app.py
+  ```
+  启动后访问浏览器: `http://localhost:5002`
+
 ## 🚀 如何运行
 
 ### 环境依赖

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>照片生成 MuJoCo 场景</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <style>
+    body { font-family: sans-serif; background: #111; color: #eee; margin: 0; }
+    .bar { padding: 12px 16px; background: #1b1b1b; border-bottom: 1px solid #333; display:flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .bar input, .bar button { padding: 8px 10px; }
+    .bar label { display:flex; gap:6px; align-items:center; }
+    .grid { display:flex; gap: 16px; padding: 16px; flex-wrap: wrap; }
+    .panel { background: #1b1b1b; border: 1px solid #333; border-radius: 8px; padding: 12px; }
+    #cameraBox { position: relative; width: 640px; height: 480px; }
+    #input_video { width: 640px; height: 480px; transform: scaleX(-1); }
+    #output_canvas { position:absolute; left:0; top:0; width:640px; height:480px; transform: scaleX(-1); }
+    #status { font-weight: 700; }
+    #objects { max-height: 260px; overflow:auto; }
+    .row { display:flex; gap: 10px; align-items:center; margin: 6px 0; }
+    select { padding: 8px 10px; min-width: 200px; }
+    button { background:#2b7; border:0; color:#111; border-radius:6px; cursor:pointer; }
+    button.secondary { background:#444; color:#eee; }
+    button.danger { background:#e55; color:#111; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div id="status">未连接</div>
+    <label>meters_per_px <input id="meters_per_px" type="number" step="0.0001" value="0.0015" style="width:120px"></label>
+    <label>center_x <input id="center_x" type="number" step="0.01" value="0.5" style="width:90px"></label>
+    <label>center_y <input id="center_y" type="number" step="0.01" value="0.0" style="width:90px"></label>
+    <label>table_z <input id="table_z" type="number" step="0.01" value="0.0" style="width:90px"></label>
+    <input id="photo" type="file" accept="image/*">
+    <button onclick="uploadPhoto()">上传并生成场景</button>
+    <button class="secondary" onclick="toggleControl()" id="toggleBtn">启用手势控制</button>
+    <button class="secondary" onclick="resetSim()">重置仿真</button>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <div id="cameraBox">
+        <video id="input_video" autoplay></video>
+        <canvas id="output_canvas" width="640" height="480"></canvas>
+      </div>
+    </div>
+
+    <div class="panel" style="min-width:320px; flex:1">
+      <div class="row">
+        <div>Hand:</div>
+        <div id="handDisp">None</div>
+      </div>
+      <div class="row">
+        <div>Grasp:</div>
+        <div id="graspDisp">Open</div>
+      </div>
+      <div class="row">
+        <div>Pos:</div>
+        <div><span id="posX">0.00</span>, <span id="posY">0.00</span>, <span id="posZ">0.50</span></div>
+      </div>
+
+      <hr style="border-color:#333">
+
+      <div class="row">
+        <select id="objSelect"></select>
+        <button onclick="pickSelected()">对准物体</button>
+      </div>
+      <div id="objects"></div>
+      <div style="opacity:0.8; font-size: 13px; margin-top: 10px; line-height: 1.4;">
+        先上传照片生成场景；再启用手势控制。捏合拇指+食指控制吸盘吸附，手掌远近控制高度。
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let isControlEnabled = false;
+    let lastFingerDist = 0;
+
+    socket.on('connect', () => {
+      document.getElementById('status').innerText = '已连接: / (端口 5002)';
+      document.getElementById('status').style.color = '#2b7';
+    });
+    socket.on('disconnect', () => {
+      document.getElementById('status').innerText = '未连接';
+      document.getElementById('status').style.color = '#e55';
+    });
+
+    function toggleControl() {
+      isControlEnabled = !isControlEnabled;
+      document.getElementById('toggleBtn').innerText = isControlEnabled ? '暂停手势控制' : '启用手势控制';
+      socket.emit('control_state', { active: isControlEnabled });
+    }
+
+    function resetSim() {
+      socket.emit('reset_sim');
+    }
+
+    async function uploadPhoto() {
+      const fileInput = document.getElementById('photo');
+      if (!fileInput.files || fileInput.files.length === 0) return;
+      const form = new FormData();
+      form.append('photo', fileInput.files[0]);
+      form.append('meters_per_px', document.getElementById('meters_per_px').value);
+      form.append('center_x', document.getElementById('center_x').value);
+      form.append('center_y', document.getElementById('center_y').value);
+      form.append('table_z', document.getElementById('table_z').value);
+      const res = await fetch('/upload', { method: 'POST', body: form });
+      const json = await res.json();
+      if (!json.ok) {
+        alert(json.error || '上传失败');
+        return;
+      }
+      renderObjects(json.objects || []);
+    }
+
+    function renderObjects(objs) {
+      const sel = document.getElementById('objSelect');
+      sel.innerHTML = '';
+      const list = document.getElementById('objects');
+      list.innerHTML = '';
+
+      if (objs.length === 0) {
+        list.innerText = '未检测到物体（尝试提高对比度/更换背景/调 meters_per_px）。';
+        return;
+      }
+      for (const o of objs) {
+        const opt = document.createElement('option');
+        opt.value = o.name;
+        opt.innerText = `${o.name} (${o.geom_type})`;
+        sel.appendChild(opt);
+
+        const div = document.createElement('div');
+        div.style.padding = '6px 0';
+        div.style.borderBottom = '1px solid #333';
+        div.innerText = `${o.name}  pos=[${o.pos.map(v => v.toFixed(3)).join(', ')}]  size=[${o.size.map(v => v.toFixed(3)).join(', ')}]`;
+        list.appendChild(div);
+      }
+    }
+
+    function pickSelected() {
+      const sel = document.getElementById('objSelect');
+      if (!sel.value) return;
+      socket.emit('pick_object', { name: sel.value });
+    }
+
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    function onResults(results) {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        const landmarks = results.multiHandLandmarks[0];
+        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+        drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
+        document.getElementById('handDisp').innerText = 'Detected';
+        if (isControlEnabled) {
+          sendHandControl(landmarks);
+        }
+      } else {
+        document.getElementById('handDisp').innerText = 'None';
+      }
+      canvasCtx.restore();
+    }
+
+    function sendHandControl(landmarks) {
+      const wrist = landmarks[0];
+      const indexTip = landmarks[8];
+      const thumbTip = landmarks[4];
+      const midTip = landmarks[12];
+
+      const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+      lastFingerDist = dist;
+      const grasp = dist < 0.055 ? 1.0 : 0.0;
+
+      const relX = (wrist.x - 0.5) * -1.0;
+      const relY = (0.5 - wrist.y);
+
+      const palmSize = Math.hypot(wrist.x - midTip.x, wrist.y - midTip.y);
+      let zVal = (palmSize - 0.08) / (0.25 - 0.08);
+      if (zVal < 0) zVal = 0;
+      if (zVal > 1) zVal = 1;
+      const relZ = 1.0 - zVal;
+
+      document.getElementById('posX').innerText = relX.toFixed(2);
+      document.getElementById('posY').innerText = relY.toFixed(2);
+      document.getElementById('posZ').innerText = relZ.toFixed(2);
+      document.getElementById('graspDisp').innerText = grasp > 0.5 ? 'Closed' : 'Open';
+
+      socket.emit('hand_data', { x: relX, y: relY, z: relZ, grasp });
+    }
+
+    const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    hands.onResults(onResults);
+
+    const cam = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({ image: videoElement }); },
+      width: 640,
+      height: 480
+    });
+    cam.start();
+  </script>
+</body>
+</html>
+
